@@ -1,0 +1,126 @@
+Mensajes de Conexion
+--------------------
+msg:   login
+param: user
+       pass
+flujo: C-S
+codigo:50(0x32)
+
+msg:   redireccion a map server
+param: ip (formato numerico)
+           puerto
+flujo: S-C
+codigo:51(0x33)
+
+msg:   cargar mapa
+param: mapa
+flujo: S-C
+codigo:52(0x34)
+
+msg:   envio de entidades
+param: string de entidades
+flujo: S-C
+codigo:53(0x35)
+
+msg:   envio de datos de cliente
+param: nombre
+       id
+       empresa
+       raza
+       modelo
+flujo: S-C       
+codigo:54(0x36)
+
+msg:   desconexion cliente
+param: id
+flujo: S-C
+codigo:55(0x37)
+
+Mensajes de Comunicacion
+------------------------
+msg:   envio de mensaje privado
+param: mensaje
+       destinatario
+flujo: C-S
+codigo:70(0x46)
+
+msg:   recepcion de mensaje privado
+param: mensaje
+       remitente
+flujo: S-C
+codigo:71(0x47)
+
+msg:   envio de mensaje publico por planeta
+param: mensaje
+flujo: C-S
+codigo:72(0x48)
+
+msg:   recepcion de mensaje publico por planeta
+param: remitente
+       mensaje
+flujo: S-C
+codigo:73(0x49)
+
+msg:   envio de mensaje al clan
+param: mensaje
+flujo: C-S
+codigo:74(0x4A)
+
+msg:   recepcion de mensaje del clan
+param: remitente
+       mensaje
+flujo: S-C
+codigo:75(0x4B)
+
+msg:   recepcion memo 
+param: remitente
+       mensaje
+flujo: S-C
+codigo:76(0x4C)
+
+Mensajes de Fisica
+------------------
+msg:   cambio de estado del cliente
+param: estado
+       angulo con eje Y
+       angulo con eje x
+flujo: C-S
+codigo:90(0x5A)
+
+msg:   posicion cliente
+param: idcliente
+       estado
+       Vector Posicion(x,y,z)
+       Vector Velocidad(vx,vy,vz)
+       angulo con eje Y
+       angulo con eje x
+       ping(ms)
+flujo: S-C
+codigo:91(0x5B)
+
+Mensajes de Status
+-----------------
+msg:   ping
+flujo: ND
+codigo:110(0x6E)
+
+msg:   listo para jugar
+flujo: C-S
+codigo:120 (0x78)
+
+msg:   segundos antes de dar nuevas posiciones
+flujo S-C
+codigo:121 (0x79)
+param: segundos
+
+msg:   actualizacion datos arma
+flujo:S-C
+codigo:130 (0x82)
+param: idarma
+       numero de cartuchos
+       numero total de balas
+
+msg:   arma actual
+flujo:S-C
+codigo:131 (0x83)
+param: idarma
