@@ -1,14 +1,14 @@
-#include <string.h>
+#include <windows.h>
+#include <GL/GL.h>
 #include "ServerPlayer.h"
+#include "Log.h"
 
-int ServerPlayer::GetMessages(char *Data)
+void ServerPlayer::Render()
 {
-	if(offset==0)
-		return 0;
-
-	int size=offset;
-	memcpy(Data,Messages,offset);
-	offset=0;
-
-	return size;
+	glPushMatrix();
+	glTranslatef(Position.x(),Position.y(),Position.z());
+	model.Render();
+	glPopMatrix();
+	//Player::Render();
+	//Log::Output("Rendering ClientPlayer %s\n",name);
 }

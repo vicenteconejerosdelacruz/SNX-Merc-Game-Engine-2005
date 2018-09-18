@@ -3,6 +3,8 @@
 #include "ConfigFile.h"
 #include "Log.h"
 #include "Vector3.h"
+#include "Action.h"
+#include "AudioManager.h"
 
 extern ConfigFile Config;
 
@@ -15,6 +17,7 @@ Server::Server()
 	bShutDown=false;
 	SListWorlds=NULL;
 	OffsetPool=0;
+	memset(PlayerName,0,sizeof(PlayerName));
 }
 
 Server::~Server()
@@ -27,10 +30,9 @@ int Server::GetInitQueue()
 	return INIT_NETWORK|INIT_PHYSICS|INIT_TIMER;
 }
 
-void Server::Init()
+void Server::Init(int Value)
 {
 	Services=GetInitQueue();
-
 	UsingAcounts=Config.getBoolean("acounts");
 
 	SDL_Init(0);	
@@ -38,14 +40,99 @@ void Server::Init()
 	if((Services&INIT_NETWORK)==INIT_NETWORK)
 		Net_Server.Init();
 
+#ifdef MERC_DB
 	if((Services&INIT_DB)==INIT_DB)
 		InitWorldsUsingDB();
 	else
-		InitWorldsUsingLua();
+#endif
+	InitWorldsUsingLua();
+
+	
+	if(Value==(GAME_CLIENT|GAME_SERVER))
+	{
+		IHandler.Init();
+		SDisplay.Init();
+		ServerType=Value;//the player is the server	
+		strcat(PlayerName,Config.getString("user"));
+
+		SPManager.Add(
+			PlayerName,//name
+			NULL,//IPaddress
+			0,//ID
+			"Humans",//model
+			TEST_MAP);
+
+		AudioManager *manager = AudioManager::getInstance();
+		manager->setMapName(TEST_MAP);
+		manager->InitAudio();
+		manager->loadPlayLists();
+		manager->play("fondo.ogg",MERC_STATIC);
+		manager->play("fire.ogg",MERC_STATIC);
+	
+		ServerPlayer *SPptr;
+		World_Server *WSptr;
+
+		SPptr=SPManager.GetPlayer(PlayerName);
+		WSptr=GetWorld(SPptr->planetname);
+		WSptr->World_Client::Init(SPptr->planetname);
+		WSptr->PhManager.AddPlayer(SPptr->id);
+		SPptr->ping=0;
+
+		SDisplay.AddObject(WSptr);
+		int NumStructures=WSptr->GetNumStructures();
+
+		for(int i=0;i<NumStructures;i++)
+			SDisplay.AddObject(WSptr->GetStructureByNum(i));
+		
+		SDisplay.AddObject(WSptr->GetSkyDome());
+		//SDisplay.AddObject(SPptr);
+		SPptr->enabled=true;
+
+		for(int i=0;i<2;i++)
+		{
+			for(int j=0;j<1;j++)
+			{
+				//Position[0]=800;
+				//Position[1]=1000;
+				//Position[2]=300;
+				//float LaPos[]={500.0f,170.0f+i*8.0f,350.0f+j*8.0f};
+				float LaPos[]={840.0f,470.0f+i*8.0f,320.0f+j*8.0f};
+				float LaRot[]={0.0f,0.0f,0.0f};
+				WSptr->PhManager.AddBody("dummy",LaPos,LaRot);
+			}
+		}
+
+		int numbodies=WSptr->PhManager.GetNumBodies();
+		for(int i=0;i<numbodies;i++)
+		{
+			char modelname[32];
+			int BodyID;
+			WSptr->PhManager.GetBodyData(i,&BodyID,modelname);
+			DManager.AddObject(BodyID,modelname);
+			SDisplay.AddObject(DManager.GetObjectByNum(i));
+		}
+
+		int numstatics=WSptr->PhManager.GetNumObjects();
+		for(int i=0;i<numstatics;i++)
+		{
+			SDisplay.AddObject(WSptr->PhManager.GetObjectByNum(i));
+		}
+	}
+	else if(Value==GAME_SERVER)
+	{
+		ServerType=Value;//is a dedicated server
+	}
+	else//Not Should Be Here
+	{
+		Log::Output("invalid value passed to Server::Init\n");
+		exit(EXIT_FAILURE);
+	}
 
 	CreateTimers();
 
 }
+
+#ifdef MERC_DB
 
 void Server::InitWorldsUsingDB()
 {
@@ -68,10 +155,11 @@ void Server::InitWorldsUsingDB()
 
 	DB.CloseQuery();
 }
+#endif
 
 void Server::InitWorldsUsingLua()
 {
-	ConfigFile CFMap("maps.cfg");
+	ConfigFile CFMap("Configs/maps.cfg");
 
 	NumWorlds=CFMap.getInteger("num_maps");
 	Log::Output("Num planets %d\n",NumWorlds);
@@ -108,14 +196,18 @@ void Server::AddWorld(char *name)
 		WSPtr=WSPtr->next;
 	}
 
-	WSPtr->Init(name);
+	Log::Output("el mundo se llama %s\n",name);
+	WSPtr->Init(name,ServerType);
 }
 
 void Server::CreateTimers()
 {
-	SDL_InitSubSystem(SDL_INIT_TIMER);
-	SDL_AddTimer(1000,SendPing,&SPManager);
-	SDL_AddTimer(50,SendPlayersStates,&SPManager);
+	if(SDL_WasInit(SDL_INIT_TIMER)==0)
+		SDL_InitSubSystem(SDL_INIT_TIMER);
+
+	SDL_AddTimer(1000,SendPing,this);
+	SDL_AddTimer(50,SendPlayersStates,this);
+	SDL_AddTimer(150,SendBodyStates,this);
 }
 
 void Server::AdvanceFrame()
@@ -126,13 +218,13 @@ void Server::AdvanceFrame()
 	accum+=delta;
 
 	GetIncomingData();
-	HandleConnections();
-	DispatchMessages();
+	CheckZombies();
+	//HandleConnections();
 	
 	World_Server *WSptr;
 
 	//Physic Step Size
-	while(accum>=(int)(PHYSIC_STEP_SIZE/2*1000)){
+	while(accum>=(int)(PHYSIC_STEP_SIZE/1*1000)){
 		WSptr=SListWorlds;
 		for(int i=0;i<NumWorlds;i++)
 		{
@@ -140,11 +232,13 @@ void Server::AdvanceFrame()
 			WSptr=WSptr->next;
 		}
 		
-		accum-=(int)(PHYSIC_STEP_SIZE/2*1000);
+		accum-=(int)(PHYSIC_STEP_SIZE/1*1000);
 	}
 
 	//update client states
-	for(int i=0;i<SPManager.GetNumPlayers();i++)
+	int nplayers=SPManager.GetNumPlayers();
+	
+	for(int i=0;i<nplayers;i++)
 	{
 		ServerPlayer *SPptr;
 		SPptr=(ServerPlayer *)SPManager.GetPlayerByNum(i);
@@ -161,121 +255,89 @@ void Server::AdvanceFrame()
 
 		Vector3 Position;
 		Vector3 Velocity;
-		WSptr->PhManager.GetPlayerState(SPptr->id,Position,Velocity);
-		SPManager.SetPlayerState(SPptr->id,Position,Velocity);
+		float Rotation[2];
+		int FeetState;
+		WSptr->PhManager.GetPlayerState(SPptr->id,Position,Velocity,Rotation,&FeetState);
+		SPManager.SetPlayerState(SPptr->id,Position,Velocity,Rotation,FeetState);
 	}
 
-	DispatchMessages();
-}
+	if((ServerType&GAME_CLIENT)==GAME_CLIENT)
+	{
+		Input input;
+		input=IHandler.CheckInput();
 
-void Server::HandleConnections()
-{
-	char Data[1024];
+		if((input.GameState&GAME_QUIT)==GAME_QUIT)
+			bShutDown=true;
 
-	for(int i=0;i<OffsetPool;i++)
-		if(Net_Server.isSocketActive(SocketPool[i]))
+		ServerPlayer *SPptr;
+		SPptr=(ServerPlayer *)SPManager.GetPlayer(PlayerName);
+
+		if(input.Rotation[0]!=0.0f||input.Rotation[1]!=0.0f)
+			SPManager.PlayerAddRotation(SPptr->id,input.Rotation);
+
+		if(SPptr->Rotation[0]	>=	1.0)
+			SPptr->Rotation[0]	=	1.0;
+		if(SPptr->Rotation[0]	<=	-1.0)
+			SPptr->Rotation[0]	=	-1.0;
+
+		int action=input.KeyState;
+		if((action&A_STANDING))
 		{
-			MsgHeader Header;
-			if(Net_Server.Recv(SocketPool[i],&Header,Data))
+			SPptr->SecondHierarchy&=(~S2_WALK);
+			SPptr->SecondHierarchy|=S2_STAND;
+			SPptr->SecondHierarchy&=(~S2_RUN);
+		}
+
+		if(	((action & A_MOVING_FRONT)==A_MOVING_FRONT)||
+			((action & A_MOVING_BACK )==A_MOVING_BACK )||
+			((action & A_STRAFE_RIGHT)==A_STRAFE_RIGHT)||
+			((action & A_STRAFE_LEFT )==A_STRAFE_LEFT )){
+
+			SPptr->SecondHierarchy&=(~S2_WALK);
+			SPptr->SecondHierarchy&=(~S2_STAND);
+			SPptr->SecondHierarchy|=S2_RUN;
+
+			if((action&A_SILENT_WALK)==A_SILENT_WALK)
 			{
-				switch(Header.type)
-				{
-				case MSG_LOGIN:
-					MsgLogin *MLogin;
-					MLogin=(MsgLogin *)Data;
-					if(UsingAcounts)
-					{
-						AddClientUsingAccount(MLogin,SocketPool[i]);
-					}
-					else
-					{
-						AddClient(MLogin,SocketPool[i]);
-					}
-
-				break;
-				default:
-
-				break;
-				}
+				SPptr->SecondHierarchy|=S2_WALK;
+				SPptr->SecondHierarchy&=(~S2_RUN);
 			}
 		}
-}
 
-void Server::AddClientUsingAccount(MsgLogin *MLogin,TCPsocket socket)
-{
+		WSptr->PhManager.UpdatePlayer(SPptr->id,SPptr->SecondHierarchy,SPptr->UltraHierarchy,action);
+		WSptr->PhManager.UpdatePlayerRotation(SPptr->id,SPptr->Rotation);
 
-}
-
-void Server::AddClient(MsgLogin *MLogin,TCPsocket socket)
-{
-	bool kicked;
-	kicked=false;
-
-	Log::Output("--%s Trying to Connect--\n",MLogin->user);
-
-	if(SPManager.GetPlayer(MLogin->user)!=NULL)
-	{
-		IPaddress *remoteip;
-		Uint32 ipaddr;
-		remoteip=SDLNet_TCP_GetPeerAddress(socket);
-		ipaddr=SDL_SwapBE32(remoteip->host);
-
-		Log::Output("%s Has Been Kicked from %d.%d.%d.%d:%hu\n",MLogin->user,
-					ipaddr>>24,
-					(ipaddr>>16)&0xff,
-					(ipaddr>>8)&0xff,
-					ipaddr&0xff,
-					remoteip->port);
-
-		return;	
-	}
-					
-	//it supposed that this thing are for the typical FPS
-	//not experience,nothing of that RPG's Things :P,etc
-	int ID=SPManager.GetNumPlayers();
-	SPManager.Add(MLogin->user,socket,ID,"default","Korhal");
-	int ClientID;
-	ClientID=SPManager.GetPlayer(MLogin->user)->id;
-
-	//Not Using Accounts mean's that we have to spawn the client in the Main World
-	//CHANGE: "Korhal"
-	World_Server *WSptr;
-	WSptr=GetWorld("Korhal");
-
-	if(WSptr==NULL)
-	{
-		Net_Server.DeleteSocket(socket);
-		DeleteFromPool(socket);
-		SPManager.Delete(ClientID);
-		return;
-	}
-
-	SPManager.AddMessage(ClientID,MSG_LOAD_MAP,"Korhal");
-	WSptr->PhManager.AddPlayer(ClientID);
-	ServerPlayer *SPptr;
-
-	for(int i=0;i<SPManager.GetNumPlayers();i++)
-	{
-		SPptr=SPManager.GetPlayerByNum(i);
-		if(strcmp(SPptr->planetname,"Korhal")==0)
+		int num_bodies=WSptr->PhManager.GetNumBodies();
+		for(int i=0;i<num_bodies;i++)
 		{
-			if(strcmp(SPptr->name,MLogin->user)!=0)
-			{
-				SPManager.AddMessage(SPptr->id,MSG_CLIENT_DATA,SPManager.GetPlayer(ClientID));
-				SPManager.AddMessage(ClientID,MSG_CLIENT_DATA,SPptr);
-			}
+			WSptr->PhManager.GetBodyByNum(i);
+			int BodyID;
+			Vector3 Position;
+			Vector3 Velocity;
+			Vector3 AngVel;
+			Quaternion Quat;
+
+			WSptr->PhManager.GetBodyState(i,
+				&BodyID,
+				Position,
+				Velocity,
+				AngVel,
+				Quat);
+
+			DManager.UpdateObject(BodyID,
+				Position,
+				Velocity,
+				AngVel,
+				Quat);
+
 		}
+
+		DManager.AdvanceFrame();
+
+		WSptr->Sky.Place(SPptr->Position);
+		SDisplay.PlaceCamera(SPptr);
+		SDisplay.Render();
 	}
-
-	SPManager.AddMessage(ClientID,MSG_CLIENT_DATA,SPManager.GetPlayer(ClientID));
-	Vector3 Position;
-	Vector3 Velocity;
-
-	WSptr->PhManager.GetPlayerState(ClientID,Position,Velocity);
-	SPManager.SetPlayerState(ClientID,Position,Velocity);
-	SPManager.AddMessage(ClientID,MSG_CLIENT_STATE);
-	SPManager.GetPlayer(ClientID)->enabled=true;
-	DeleteFromPool(socket);
 }
 
 World_Server *Server::GetWorld(char *name)
@@ -304,75 +366,380 @@ World_Server *Server::GetWorld(char *name)
 
 void Server::GetIncomingData()
 {
-	TCPsocket NewConnection=Net_Server.CheckNewConnection();
-
-	if(NewConnection!=NULL)
-	{
-		Net_Server.AddSocket(NewConnection);
-		SocketPool[OffsetPool]=NewConnection;
-		OffsetPool++;
-	}
-}
-
-void Server::DispatchMessages()
-{
+	IPaddress ip;
 	char Data[1024];
+	int recv;
+	ServerPlayer * SPptr;
 
-	for(int i = 0 ; i < SPManager.GetNumPlayers() ; i++){
-		
-		memset(Data,0,sizeof(Data));
-		int size;
-		size=SPManager.GetPlayerByNum(i)->GetMessages(Data);
+	recv=Net_Server.Recv(&ip,Data);
 
-		if(size>0)
-			Net_Server.Send(SPManager.GetPlayerByNum(i)->socket,Data,size);
+	if(Data[0]!=0){
+		//Clon's-Stuff
+		//CheckConectionList(ip);//someday :D
+		switch(Data[0])
+		{
+		case MSG_LOGIN:
+			MsgLogin *Login;
+			Login=(MsgLogin *)(Data+1);
+			if(strncmp(Login->version,GAME_VERSION,strlen(GAME_VERSION))!=0)
+				break;
+
+			//if(CheckUser(Login->user,Login->pass)==false)
+				//break;
+
+			AddToConnectionPool(Login->user,Login->pass,ip);
+		break;
+		case MSG_JOIN_GAME:
+			if(!IsInConnectionPool(ip))
+				return;//faking packets
+
+			PoolElement *PlayerData;
+
+			PlayerData=GetPendingPlayer(ip);
+			
+			if(PlayerData!=NULL)
+			{
+				AddClient(PlayerData->name,PlayerData->pass,PlayerData->ip);
+				DeleteFromConnectionPool(ip);
+			}
+		break;
+		case MSG_PING:
+			SPptr=SPManager.GetPlayer(ip);
+			if(SPptr->PingFree==false)
+			{
+				SPptr->ping=(SDL_GetTicks()-SPptr->PingTime)/2;
+				SPptr->PingFree=true;
+			}
+			//else//fake packet
+		break;
+		case MSG_CLIENT_NEWPOS:
+			MsgClientPositionChange *MCHPos;
+
+			SPptr=SPManager.GetPlayer(ip);
+
+			if(SPptr->FirstHierarchy!=S1_LIVE)
+				return;
+
+			MCHPos=(MsgClientPositionChange *)(Data+1);
+			UpdateClientState(SPptr->id,MCHPos);
+		break;
+		case MSG_CLIENT_ROT:
+			MsgClientRotation *MCRot;
+
+			SPptr=SPManager.GetPlayer(ip);
+
+			if(SPptr->FirstHierarchy!=S1_LIVE)
+				return;
+
+			MCRot=(MsgClientRotation *)(Data+1);
+			UpdateClientRotation(SPptr->id,MCRot);
+
+		break;
+		}
+
 	}
 }
 
-bool Server::ShutDownPending()
+bool Server::IsInConnectionPool(IPaddress ip)
 {
+	for(int i=0;i<OffsetPool;i++)
+		if(	ConnectionPool[i].ip.host==ip.host&&
+			ConnectionPool[i].ip.port==ip.port)
+			return true;
 
 	return false;
 }
 
-Uint32 SendPing(Uint32 interval, void* param){
-	
-	ServerPlayerManager *SPMptr=(ServerPlayerManager*)param;
-	int nPlayers=SPMptr->GetNumPlayers();
+PoolElement *Server::GetPendingPlayer(IPaddress ip)
+{
+	for(int i=0;i<OffsetPool;i++)
+		if(	ConnectionPool[i].ip.host==ip.host&&
+			ConnectionPool[i].ip.port==ip.port)
+			return &ConnectionPool[i];
 
-	for(int i = 0 ; i < nPlayers ; i++)
-		if(SPMptr->GetPlayer(i)->PingFree==true){
-			int id;
-			id=SPMptr->GetPlayer(i)->id;
-			SPMptr->AddMessage(id,110);
-			SPMptr->GetPlayer(i)->PingFree=false;
+	return NULL;
+}
+
+void Server::AddToConnectionPool(char *name, char *pass, IPaddress ip)
+{
+	strcat(ConnectionPool[OffsetPool].name,name);
+	strcat(ConnectionPool[OffsetPool].pass,pass);
+	ConnectionPool[OffsetPool].ip=ip;
+	ConnectionPool[OffsetPool].time=SDL_GetTicks();
+
+	Net_Server.Send(ConnectionPool[OffsetPool].ip,MSG_LOAD_MAP,TEST_MAP);
+	for(int i=0;i<SPManager.GetNumPlayers();i++)
+	{
+		ServerPlayer *SPptr;
+		SPptr=SPManager.GetPlayerByNum(i);
+		Net_Server.Send(ConnectionPool[OffsetPool].ip,
+			MSG_CLIENT_DATA,
+			SPptr->id,
+			SPptr->name,
+			SPptr->agency,
+			SPptr->race,
+			SPptr->modelname);
+	}
+
+	Net_Server.Send(ConnectionPool[OffsetPool].ip,
+		MSG_WAITING);
+	OffsetPool++;
+}
+
+void Server::DeleteFromConnectionPool(IPaddress ip)
+{
+	for(int i=0;i<OffsetPool;i++)
+		if(	ConnectionPool[i].ip.host==ip.host&&
+			ConnectionPool[i].ip.port==ip.port)
+			for(int j=i;j<OffsetPool;j++)
+			{
+				memcpy(&ConnectionPool[j],&ConnectionPool[j+1],sizeof(PoolElement));
+				OffsetPool--;
+			}
+}
+
+void Server::CheckZombies()
+{
+	for(int i=0;i<OffsetPool;i++)
+	{
+		Uint32 dTime=SDL_GetTicks()-ConnectionPool[i].time;
+
+		if(dTime>OTIME_CONNECTION)
+		{
+			Uint32 ipaddr;
+			ipaddr=SDL_SwapBE32(ConnectionPool[i].ip.host);
+
+			Log::Output("Deleting a Zombie Connection from %d.%d.%d.%d\n",
+				ipaddr>>24,
+				(ipaddr>>16)&0xff,
+				(ipaddr>>8)&0xff,
+				ipaddr&0xff);
+
+			DeleteFromConnectionPool(ConnectionPool[i].ip);
 		}
+	}
+}
+
+void Server::AddClient(char *name, char *pass, IPaddress ip)
+{
+	Log::Output("name %s,pass %s\n",name,pass);
+
+	int ID=SPManager.GetNumPlayers();
+	SPManager.Add(name,&ip,ID,"Humans",TEST_MAP);
+	
+	ServerPlayer *NewServerPlayer;
+	NewServerPlayer=SPManager.GetPlayer(name);
+	World_Server *WSptr;
+	WSptr=GetWorld(NewServerPlayer->planetname);
+
+	WSptr->PhManager.AddPlayer(NewServerPlayer->id);
+
+	for(int i=0;i<SPManager.GetNumPlayers();i++)
+	{
+		ServerPlayer *SPptr;
+		SPptr=SPManager.GetPlayerByNum(i);
+		if(SPptr->ip!=NULL)
+			if(strcmp(SPptr->planetname,NewServerPlayer->planetname)==0)
+			{
+				Net_Server.Send(*SPptr->ip,
+					MSG_CLIENT_DATA,
+					NewServerPlayer->id,
+					NewServerPlayer->name,
+					NewServerPlayer->agency,
+					NewServerPlayer->race,
+					NewServerPlayer->modelname);
+			}
+	}
+
+	if(ServerType==(GAME_CLIENT|GAME_SERVER))
+	{
+		SDisplay.AddObject(NewServerPlayer);
+	}
+
+	NewServerPlayer->enabled=true;
+}
+
+Uint32 SendPing(Uint32 interval, void* param){
+
+	Server *Sptr=(Server*)param;
+
+	for(int i = 0 ; i < Sptr->SPManager.GetNumPlayers(); i++)
+	{
+		ServerPlayer *SPptr;
+
+		SPptr=Sptr->SPManager.GetPlayerByNum(i);
+		if(SPptr->PingFree==true)
+		{
+			if(SPptr->ip!=NULL)
+			{
+				Sptr->Net_Server.Send(*SPptr->ip,MSG_PING);	
+				SPptr->PingFree=false;
+				SPptr->PingTime=SDL_GetTicks();
+			}
+		}
+	}
 
 	return interval;
 }
 
 Uint32 SendPlayersStates(Uint32 interval,void *param)
 {
-	ServerPlayerManager *SPMptr=(ServerPlayerManager*)param;
+	Server *Sptr=(Server*)param;
+	ServerPlayerManager *SPMptr;
+
+	SPMptr=&Sptr->SPManager;
 
 	int numplayers=SPMptr->GetNumPlayers();
+
 	for(int i=0;i<numplayers;i++)
 	{
-		if(SPMptr->GetPlayerByNum(i)->enabled==true)
-			SPMptr->AddMessage(SPMptr->GetPlayerByNum(i)->id,MSG_CLIENT_STATE);
+		ServerPlayer *SPptr;
+		SPptr=SPMptr->GetPlayerByNum(i);
+		if(SPptr->ip==NULL)
+			continue;
+
+		for(int j=0;j<numplayers;j++)
+		{
+			ServerPlayer *SP2ptr;
+			SP2ptr=SPMptr->GetPlayerByNum(j);
+
+			if(strcmp(SPptr->planetname,SP2ptr->planetname)==0)
+				Sptr->Net_Server.Send(
+					*SPptr->ip,
+					MSG_CLIENT_STATE,
+					SP2ptr->id,
+					SP2ptr->ping,//ping WTF??
+					SP2ptr->FirstHierarchy,
+					SP2ptr->SecondHierarchy,
+					SP2ptr->UltraHierarchy,
+					SP2ptr->Position.GetVector(),
+					SP2ptr->Velocity.GetVector(),
+					SP2ptr->Rotation,
+					SP2ptr->FeetState);
+		}
 	}
+
 	return interval;
 }
 
-void Server::DeleteFromPool(TCPsocket socket)
+Uint32 SendBodyStates(Uint32 interval,void *param)
 {
-	for(int i=0;i<OffsetPool;i++)
-		if(SocketPool[i]==socket)
-		{
-			for(int e=i;e<OffsetPool;e++)
-				SocketPool[e]=SocketPool[e+1];
+	/*
+	Server *Sptr;
 
-			OffsetPool--;
-			break;
+	Sptr=(Server *)param;
+
+	int num_worlds=Sptr->GetNumWorlds();
+
+	World_Server *WSptr;
+
+	for(int i=0;i<num_worlds;i++)
+	{
+		WSptr=Sptr->GetWorldByNum(i);
+		int num_bodies=WSptr->PhManager.GetNumBodies();
+		for(int j=0;j<num_bodies;j++)
+		{
+			Vector3 Position;
+			Vector3 Velocity;
+			Vector3 AngularVel;
+			Quaternion Quat;
+			int BodyID;
+			WSptr->PhManager.GetBodyState(j,&BodyID,Position,Velocity,AngularVel,Quat);
+
+			int num_players=WSptr->PhManager.GetNumPlayers();
+				
+			for(int k=0;k<num_players;k++)
+			{
+				PhysicPlayer *PPptr;
+				PPptr=WSptr->PhManager.GetPlayerByNum(k);
+
+				ServerPlayer *SPptr;
+				SPptr=Sptr->SPManager.GetPlayer(PPptr->PlayerID);
+				if(SPptr->enabled==false)
+					continue;
+
+				WSptr->AddMessage(MSG_BODY_STATE,
+					BodyID,
+					Position.GetVector(),
+					Velocity.GetVector(),
+					AngularVel.GetVector(),
+					Quat.GetQuaternion()
+					);
+			}
 		}
+	}
+*/
+	return interval;
+	
+}
+
+void Server::UpdateClientRotation(int PlayerID, MsgClientRotation *NewRot)
+{
+	ServerPlayer *PlayerPtr;
+
+	PlayerPtr=SPManager.GetPlayer(PlayerID);
+
+	for(int i=0;i<2;i++)
+	{
+		PlayerPtr->Rotation[i]=NewRot->Rotation[i];
+	}
+
+	World_Server *WorldPtr;
+	
+	WorldPtr=GetWorld(PlayerPtr->planetname);
+	WorldPtr->PhManager.UpdatePlayerRotation(PlayerID,PlayerPtr->Rotation);
+	//UpdateClientState(PlayerID,
+}
+
+void Server::UpdateClientState(int PlayerID, MsgClientPositionChange *Change)
+{
+	int action=Change->input;
+	ServerPlayer *PlayerPtr;
+
+	PlayerPtr=SPManager.GetPlayer(PlayerID);
+	
+	if((action&A_STANDING))
+	{
+		PlayerPtr->SecondHierarchy&=(~S2_WALK);
+		PlayerPtr->SecondHierarchy|=S2_STAND;
+		PlayerPtr->SecondHierarchy&=(~S2_RUN);
+	}
+
+	if(	((action & A_MOVING_FRONT)==A_MOVING_FRONT)||
+		((action & A_MOVING_BACK )==A_MOVING_BACK )||
+		((action & A_STRAFE_RIGHT)==A_STRAFE_RIGHT)||
+		((action & A_STRAFE_LEFT )==A_STRAFE_LEFT )){
+
+		PlayerPtr->SecondHierarchy&=(~S2_WALK);
+		PlayerPtr->SecondHierarchy&=(~S2_STAND);
+		PlayerPtr->SecondHierarchy|=S2_RUN;
+
+		if((action&A_SILENT_WALK)==A_SILENT_WALK)
+		{
+			PlayerPtr->SecondHierarchy|=S2_WALK;
+			PlayerPtr->SecondHierarchy&=(~S2_RUN);
+		}
+	}
+
+	World_Server *WorldPtr;
+	
+	WorldPtr=GetWorld(PlayerPtr->planetname);
+	WorldPtr->PhManager.UpdatePlayer(	PlayerID,
+										PlayerPtr->SecondHierarchy,
+										PlayerPtr->UltraHierarchy,
+										action);
+	
+}
+
+World_Server *Server::GetWorldByNum(int num)
+{
+	World_Server *WSptr=SListWorlds;
+
+	for(int i=0;i<num;i++)
+		WSptr=(World_Server *)WSptr->next;
+
+	if(WSptr!=NULL)
+		return WSptr;
+	
+	return NULL;
 }

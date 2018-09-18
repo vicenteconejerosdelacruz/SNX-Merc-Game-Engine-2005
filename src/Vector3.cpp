@@ -81,7 +81,7 @@ Vector3 &Vector3::operator-(const Vector3 &v2)
 	return(*suma);
 }
 
-/*
+/*cmnt
 Vector3 &operator=(const Vector3 &v1,const Vector3 &v2)
 {
 	if(v1
