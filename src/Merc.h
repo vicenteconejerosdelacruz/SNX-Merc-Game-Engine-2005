@@ -5,8 +5,8 @@
 #include "Client.h"
 
 /*Game types*/
-#define GAME_SERVER		0x01
-#define GAME_CLIENT		0x02
+#define GAME_SERVER				0x01
+#define GAME_CLIENT				0x02
 
 /*Services Flags*/
 #define INIT_DISPLAY	0x01

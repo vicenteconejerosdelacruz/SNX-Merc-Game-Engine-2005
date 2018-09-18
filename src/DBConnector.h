@@ -1,6 +1,11 @@
 #ifndef MERC_DBCONNECTOR_H
 #define MERC_DBCONNECTOR_H
 
+//Uncoment this if you want a PostgreSQL DB
+//#define MERC_DB
+
+#ifdef MERC_DB
+
 #include <libpq-fe.h>
 
 class DBConnector
@@ -25,5 +30,6 @@ public:
 	int GetNTuples();
 	int GetNFields();
 };
+#endif
 
 #endif

@@ -4,6 +4,8 @@
 #include "DBConnector.h"
 #include "Log.h"
 
+#ifdef MERC_DB
+
 DBConnector::DBConnector(){
 
 	
@@ -109,3 +111,5 @@ int DBConnector::GetNFields(){
 
 	return PQnfields(QResult);
 }
+
+#endif
