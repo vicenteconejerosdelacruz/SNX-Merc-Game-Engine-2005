@@ -22,6 +22,7 @@ class InputHandler
 {
 private:
 	KeyDefs *Keylist;
+	int MSensibility;
 public:
 	InputHandler();
 	Input CheckInput();

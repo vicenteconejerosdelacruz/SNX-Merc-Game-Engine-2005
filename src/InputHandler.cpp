@@ -3,7 +3,9 @@
 #include "ConfigFile.h"
 #include "Log.h"
 #include "Action.h"
-#include "Error.h"
+#include "MercError.h"
+
+bool grab=false;//test variable
 
 InputHandler::InputHandler()
 {
@@ -26,8 +28,13 @@ Input InputHandler::CheckInput()
 	Input input;
 	SDL_Event event;
 	Uint8 *keys;
+	Uint8 MouseState;
+	SDL_Surface *PointerSurface;
+	int x,y;
+	float RotX,RotY;
 	
 	SDL_PollEvent(&event);
+
 
 	input.GameState=0;
 	input.KeyState=A_STANDING;
@@ -36,6 +43,14 @@ Input InputHandler::CheckInput()
 
 	keys=SDL_GetKeyState(NULL);
 	KeyDefs *KDptr=Keylist;
+
+	//Test Shit
+	if(keys[SDLK_b])
+		grab=(grab==true)?false:true;
+
+	if(grab==true)
+		return input;
+	//End Test Shit
 
 	if(KDptr==NULL)
 		Throw("Fatal error Keylist=NULL");
@@ -51,12 +66,30 @@ Input InputHandler::CheckInput()
 		KDptr=KDptr->next;
 	}
 
+	PointerSurface=SDL_GetVideoSurface();
+	MouseState=SDL_GetMouseState(&x,&y);
+	SDL_WarpMouse((Uint16)PointerSurface->w/2,(Uint16)PointerSurface->h/2);	
+	RotY=(float)((PointerSurface->w/2)-x)/MSensibility;
+	RotX=(float)((PointerSurface->h/2)-y)/MSensibility;
+
+	if(RotX > 1.0f)
+		RotX=1.0f;
+	else if(RotX < -1.0f)
+        RotX=-1.0f;
+
+	if(RotX!=0.0f || RotY!=0.0f){
+		input.Rotation[0]=RotX;
+		//input.Rotation[0]=0;
+
+		input.Rotation[1]=RotY;
+	}
+
 	return input;
 }
 
 void InputHandler::ReadConfig()
 {
-	ConfigFile KeyBinds("KeyBinds.cfg");
+	ConfigFile KeyBinds("Configs/KeyBinds.cfg");
 
 	int NumKeys;
 	NumKeys=KeyBinds.getInteger("num_keys");
@@ -75,4 +108,6 @@ void InputHandler::ReadConfig()
 		KDptr->next->next=NULL;
 		KDptr=KDptr->next;
 	}
+
+	MSensibility=KeyBinds.getInteger("mouse_sensibility");
 }
