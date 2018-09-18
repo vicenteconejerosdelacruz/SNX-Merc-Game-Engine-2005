@@ -11,11 +11,11 @@ private:
 	bool Connected;
 	char Hostname[64];
 	IPaddress ServerIP;
-	TCPsocket ServerSocket;
+	UDPsocket ClientSocket;
 public:
 	void Init();
-	void Recv(MsgHeader *header,char *Data);
-	void Send(MsgHeader header,...);
+	void Recv(char *Data);
+	void Send(int MsgType,...);
 	bool isConnected();
 	void Connect(const char *host,int port);
 };

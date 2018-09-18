@@ -9,6 +9,15 @@
 void CNetwork::Init()
 {
 	SDLNet_Init();
+	
+	ClientSocket = SDLNet_UDP_Open(0);
+	if(!ClientSocket){
+ 		Log::Output("Unable to create ClientSocket\n");
+ 		return;
+ 	}
+
+	out=SDLNet_AllocPacket(65535);
+	in=SDLNet_AllocPacket(65535);
 }
 
 void CNetwork::Connect(const char *addr,int port)
@@ -18,78 +27,83 @@ void CNetwork::Connect(const char *addr,int port)
  
  	Port=port;
  
- 	Log::Output("Connecting to %s\n",Hostname);
- 
- 	if(SDLNet_ResolveHost(&ServerIP,Hostname,Port) == -1){
+  	if(SDLNet_ResolveHost(&ServerIP,Hostname,Port) == -1){
  		Log::Output("Unable to resolve %s\n",Hostname);
- 		Connected=false;
  		return;		
  	}
- 
- 	ServerSocket = SDLNet_TCP_Open(&ServerIP);
- 	if(!ServerSocket){
- 		Log::Output("Unable to create ServerSocket\n");
- 		Connected=false;
- 		return;
- 	}
 
-	SockSet = SDLNet_AllocSocketSet(1);
- 	if(!SockSet){
- 		Log::Output("Unable to create Socket set");
- 		Connected=false;
- 		return;
- 	}
- 
- 	SDLNet_TCP_AddSocket(SockSet,ServerSocket);
- 
- 	Connected=true;
-
+	SDLNet_UDP_Bind(ClientSocket,0,&ServerIP);
 }
 
-void CNetwork::Send(MsgHeader Header,...)
+void CNetwork::Send(int MsgType,...)
 {
 	va_list va;
 
-	va_start(va,Header);
-
-	switch(Header.type)
+	va_start(va,MsgType);
+	
+	switch(MsgType)
 	{
 	case MSG_LOGIN:
 		MsgLogin Login;
 		Login=va_arg(va,MsgLogin);
 
-		SDLNet_TCP_Send(ServerSocket,&Header,sizeof(Header));
-		SDLNet_TCP_Send(ServerSocket,&Login,sizeof(MsgLogin));
-		Log::Output("sending Login %s %s\n",Login.user,Login.pass);
+		out->data[0]=MSG_LOGIN;
+		out->len=sizeof(MsgLogin)+1;
+		memcpy(out->data+1,&Login,sizeof(MsgLogin));
+		
+		SDLNet_UDP_Send(ClientSocket,0,out);
+
+		Log::Output("sending Login %s %s %s\n",Login.user,Login.pass,Login.version);
+	break;
+	case MSG_JOIN_GAME:
+		out->data[0]=MSG_JOIN_GAME;
+		out->len=1;
+		SDLNet_UDP_Send(ClientSocket,0,out);
+	break;
+	case MSG_PING:
+		out->data[0]=MSG_PING;
+		out->len=1;
+		SDLNet_UDP_Send(ClientSocket,0,out);
+	break;
+	case MSG_CLIENT_NEWPOS:
+		MsgClientPositionChange MChPos;
+		MChPos=va_arg(va,MsgClientPositionChange);
+
+		out->data[0]=MSG_CLIENT_NEWPOS;
+		out->len=sizeof(MChPos)+1;
+		memcpy(out->data+1,&MChPos,sizeof(MChPos));
+
+		SDLNet_UDP_Send(ClientSocket,0,out);
+	break;
+	case MSG_CLIENT_ROT:
+		MsgClientRotation MCRot;
+
+		MCRot=va_arg(va,MsgClientRotation);
+
+		out->data[0]=MSG_CLIENT_ROT;
+		out->len=sizeof(MCRot)+1;
+
+		memcpy(out->data+1,&MCRot,sizeof(MCRot));
+
+		SDLNet_UDP_Send(ClientSocket,0,out);
 	break;
 	default:
 	break;
 	}
 }
 
-void CNetwork::Recv(MsgHeader *header, char *Data)
+void CNetwork::Recv(char *Data)
 {
-	int ready = SDLNet_CheckSockets(SockSet,(Uint32)0);
-	header->type=0;
-	header->size=0;
+	in->data[0]=0;
+	SDLNet_UDP_Recv(ClientSocket,in);
 
-	if(ready == -1){
-		Log::Output("Disconnected");
-		Connected=false;
-		return;
+	if(in->data[0]==0)
+	{
+		Data[0]=0;
 	}
-
-	if(SDLNet_SocketReady(ServerSocket)){
-
-		int recv=SDLNet_TCP_Recv(ServerSocket,header,sizeof(MsgHeader));
-		if(recv<=0){
-			Log::Output("Disconnected");
-			Connected=false;
-			return;
-		}
+	else
+	{
+		//memcpy(.,.,0)?
+		memcpy(Data,in->data,in->len);
 	}
-
-	if(header->size>0)
-		SDLNet_TCP_Recv(ServerSocket,Data,header->size);
-
 }
