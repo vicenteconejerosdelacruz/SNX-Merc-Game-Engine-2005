@@ -123,6 +123,7 @@ private:
 	int nFrames;
 	float Start;
 	float End;
+	char modelname[255];
 	char dirname[255]; 
 	unsigned int *textures;
 	bool loaded;
