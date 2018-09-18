@@ -1,0 +1,7 @@
+ModelName = "jeep1.ms3d"
+NumGeoms = 1
+Geom_0_Type = "Box"
+Geom_0_Size = "52.000000 | 17.000000 | 24.000000"
+Geom_0_Position = "6.699998 | 9.000003 | 0.100000"
+Geom_0_Quaternion = "1.000000 | 0.000000 | 0.000000 | 0.000000"
+
