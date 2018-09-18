@@ -3,11 +3,14 @@
 
 #include <SDL/SDL_net.h>
 
+#define PORT_SERVER	6996
+#define PORT_CLIENT	6997
+
 class Network
 {
 protected:
 	int Port;
-	SDLNet_SocketSet	SockSet;
+	UDPpacket *in,*out;
 public:
 	virtual void Init(){};
 };
