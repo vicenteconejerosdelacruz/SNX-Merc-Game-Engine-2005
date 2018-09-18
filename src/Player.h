@@ -5,8 +5,10 @@
 #include <string.h>
 
 #include "Vector3.h"
+#include "RenderAble.h"
+#include "Model.h"
 
-class Player
+class Player:public RenderAble
 {
 public:
 	Player *next;
@@ -21,6 +23,12 @@ public:
 	int WeaponID;
 	char agency[32];
 	char race[32];
+	//FSM Data
+	int FirstHierarchy;
+	int SecondHierarchy;
+	int UltraHierarchy;
+	//Model
+	Model model;
 	Player(){
 		WeaponID=0;
 		next=NULL;
@@ -31,7 +39,14 @@ public:
 		memset(modelname,0,sizeof(modelname));
 		memset(planetname,0,sizeof(planetname));
 		id=0;
+		FirstHierarchy=0;
+		SecondHierarchy=0;
+		UltraHierarchy=0;
+		Rotation[0]=0;
+		Rotation[1]=0;
 	}
+	void Render();
+	void LoadModel(char *modelname);
 };
 
 #endif

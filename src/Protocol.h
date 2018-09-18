@@ -10,19 +10,26 @@
 #define MSG_LOAD_MAP			0x34
 #define MSG_ENTITY				0x35
 #define MSG_CLIENT_DATA			0x36
+#define MSG_CLIENT_DISCONNECT	0x37
+#define MSG_JOIN_GAME			0x38
+#define MSG_WAITING				0x39
+#define MSG_CLIENT_NEWPOS		0x5A
 #define MSG_CLIENT_STATE		0x5B
-
-
-struct MsgHeader
-{
-	unsigned int size;
-	unsigned char type;
-};
+#define MSG_CLIENT_ROT			0x5C
+#define MSG_BODY_DATA			0x97
+#define MSG_BODY_STATE			0x98
+#define MSG_PING				0x6E
 
 struct MsgLogin
 {
 	char user[32];
 	char pass[32];
+	char version[5];
+};
+
+struct MsgMap
+{
+	char mapname[32];
 };
 
 struct MsgChatPublic
@@ -33,30 +40,33 @@ struct MsgChatPublic
 
 struct MsgClientData
 {
-    char name[20];
+    char name[32];
     int id;
-    char agency[20];
-    char race[20];
-    char model[20];
+    char agency[32];
+    char race[32];
+    char model[32];
 };
 
 struct MsgClientState
 {
-	int uid;
+	int id;
 	int FirstHierarchy;
 	int SecondHierarchy;
 	int UltraHierarchy;
-	float xpos,ypos,zpos;
-	float xvel,yvel,zvel;
+	float Position[3];
+	float Velocity[3];
 	float Rotation[2];
+	int FeetState;
 	int ping;//(ms)
-	int time;
 };
 
 struct MsgClientPositionChange
 {
 	int input;
-	int time;
+};
+
+struct MsgClientRotation
+{
 	float Rotation[2];
 };
 
@@ -72,10 +82,18 @@ struct MsgCurrentWeapon
 	int ID;
 };
 
-/*This are Server-Server Communication Parts, dont use in the client*/
-struct MsgNewClient
+struct MsgBodyData
 {
-	TCPsocket socket;
+	int BodyID;
+	char modelname[32];
 };
 
+struct MsgBodyState
+{
+	int BodyID;
+	float Position[3];
+	float Velocity[3];
+	float Q[4];
+	float AngVel[3];
+};
 #endif

@@ -11,6 +11,7 @@ public:
 	dBodyID Body;
 	dMass Mass;
 	dJointID Joint;
+	char modelname[32];
 };
 
 #endif
