@@ -3,3 +3,6 @@
   -let D3D do the split screen, and add 3D glasses(as a feature)
   -add shaders(look at Renderer on the 2010 project, for an easy example on how to do shaders the easy way)
   -add brain computer interface(buy one from TAGL)
+  -add nodejs and npm modules for scripting
+  -port the database engine to some nosql flavor
+  -add blockchain based easter egg
